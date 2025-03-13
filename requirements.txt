@@ -1,0 +1,8 @@
+# Core requirements for Monkey Do project
+# Generated from uv-installed packages
+
+# Google Integration
+google-api-python-client>=2.100.0
+google-auth>=2.22.0
+google-auth-oauthlib>=1.1.0
+gspread>=5.8.0
