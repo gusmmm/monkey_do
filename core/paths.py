@@ -15,6 +15,9 @@ class ProjectPaths:
         # Root directory - works regardless of where code is executed from
         self.ROOT = Path(__file__).parent.parent.absolute()
         
+        # Configuration files
+        self.ENV_FILE = self.ROOT / ".env"
+        
         # Main directories
         self.CORE = self.ROOT / "core"
         self.UTILS = self.ROOT / "utils"
