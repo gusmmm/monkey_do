@@ -161,6 +161,142 @@ def analyze_id_column(df: pd.DataFrame) -> None:
     
     print("\n" + "="*80)
 
+def analyze_id_sequences(df: pd.DataFrame) -> None:
+    """
+    Analyze ID sequences by year.
+    
+    Args:
+        df: DataFrame containing the patient data
+    """
+    print("\n" + "="*80)
+    print("🔢 ID SEQUENCE ANALYSIS BY YEAR")
+    print("="*80)
+    
+    # Check if ID column exists
+    if 'ID' not in df.columns:
+        print("\n⚠️ Warning: 'ID' column not found in the dataset!")
+        return
+    
+    # Convert ID column to string if it's not already
+    df['ID'] = df['ID'].astype(str)
+    
+    # Create helper columns for analysis
+    df_analysis = df.copy()
+    
+    # Extract year (first 2 digits) and serial (remaining digits)
+    df_analysis['year'] = df_analysis['ID'].str[:2].astype(str)
+    df_analysis['serial'] = df_analysis['ID'].str[2:].astype(str).str.lstrip('0')
+    
+    # Convert serial to integer for numerical analysis
+    df_analysis['serial_num'] = pd.to_numeric(df_analysis['serial'], errors='coerce')
+    
+    # Group by year
+    year_groups = df_analysis.groupby('year')
+    
+    print("\n📊 ID Analysis by Year:")
+    print("   Year  Count  Min Serial  Max Serial  Missing Values")
+    print("   ----  -----  ----------  ----------  --------------")
+    
+    for year, group in sorted(year_groups, reverse=True):
+        # Count entries for this year
+        count = len(group)
+        
+        # Find min and max serial numbers - handle NaN values
+        min_serial = group['serial_num'].min()
+        max_serial = group['serial_num'].max()
+        
+        # Skip this year if we have invalid data
+        if pd.isna(min_serial) or pd.isna(max_serial):
+            print(f"   {year}    {count:4d}  Invalid data - cannot analyze sequence")
+            continue
+        
+        # Convert to integers for analysis
+        min_serial_int = int(min_serial)
+        max_serial_int = int(max_serial)
+        
+        # Find missing serials
+        existing_serials = set(group['serial_num'].dropna().astype(int))
+        expected_serials = set(range(min_serial_int, max_serial_int + 1))
+        missing_serials = expected_serials - existing_serials
+        
+        # Format for display
+        if missing_serials:
+            if len(missing_serials) <= 5:
+                missing_display = ", ".join(str(s) for s in sorted(missing_serials))
+            else:
+                first_five = ", ".join(str(s) for s in sorted(missing_serials)[:5])
+                missing_display = f"{first_five}, ... ({len(missing_serials) - 5} more)"
+                
+            missing_count = f"{len(missing_serials)} ({len(missing_serials) / (max_serial_int - min_serial_int + 1):.1%})"
+        else:
+            missing_display = "None"
+            missing_count = "0"
+        
+        # Print row - use proper format specifiers for integers
+        print(f"   {year}    {count:4d}  {min_serial_int:10d}  {max_serial_int:10d}  {missing_count}")
+        
+        # If missing values, show details
+        if missing_serials:
+            print(f"      Missing in {year}: {missing_display}")
+    
+    print("\n" + "="*80)
+
+
+def analyze_id_pattern_consistency(df: pd.DataFrame) -> None:
+    """
+    Check if ID pattern follows the expected format.
+    
+    Args:
+        df: DataFrame containing the patient data
+    """
+    print("\n" + "="*80)
+    print("🔍 ID PATTERN CONSISTENCY CHECK")
+    print("="*80)
+    
+    # Check if ID column exists
+    if 'ID' not in df.columns:
+        print("\n⚠️ Warning: 'ID' column not found in the dataset!")
+        return
+    
+    # Convert ID column to string if it's not already
+    df['ID'] = df['ID'].astype(str)
+    
+    # Expected pattern: 2 digits for year + 1-3 digits for serial
+    valid_pattern = df['ID'].str.match(r'^\d{3,5}$')
+    
+    # Check if all values follow the pattern
+    if valid_pattern.all():
+        print("\n✅ All ID values follow the expected format (YYXXX)")
+    else:
+        invalid_count = (~valid_pattern).sum()
+        print(f"\n⚠️ Found {invalid_count} ID values with unexpected format")
+        
+        # Display examples of invalid IDs
+        invalid_ids = df.loc[~valid_pattern, 'ID']
+        if not invalid_ids.empty:
+            print("\n   Examples of invalid ID formats:")
+            for i, invalid_id in enumerate(invalid_ids.head(5), 1):
+                print(f"   {i}. '{invalid_id}' at row {df[df['ID'] == invalid_id].index[0] + 2}")
+            if len(invalid_ids) > 5:
+                print(f"      ... and {len(invalid_ids) - 5} more")
+    
+    # Check year patterns
+    years = df['ID'].str[:2].unique()
+    print(f"\n📅 Years found in ID prefixes: {', '.join(sorted(years))}")
+    
+    # Check for unusual patterns
+    current_year = pd.Timestamp.now().year % 100
+    future_years = [year for year in years if int(year) > current_year + 1]
+    if future_years:
+        print(f"\n⚠️ Warning: Found IDs with future years: {', '.join(future_years)}")
+    
+    # Check for very old years
+    very_old_years = [year for year in years if int(year) < current_year - 10]
+    if very_old_years:
+        print(f"\n⚠️ Warning: Found IDs with potentially old years: {', '.join(very_old_years)}")
+    
+    print("\n" + "="*80)
+
 
 def main():
     """
@@ -171,13 +307,19 @@ def main():
         csv_path = find_doentes_csv()
         
         # Load the dataframe once to avoid reading multiple times
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, dtype={'ID': str})  # Force ID column as string
         
         # Display basic file information
         display_file_info(csv_path, df)
         
         # Analyze ID column
         analyze_id_column(df)
+        
+        # Analyze ID sequences
+        analyze_id_sequences(df)
+        
+        # Analyze ID pattern consistency
+        analyze_id_pattern_consistency(df)
         
     except Exception as e:
         logger.error(f"Quality control failed: {str(e)}")
