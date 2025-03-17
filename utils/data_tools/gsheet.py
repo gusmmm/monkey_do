@@ -18,6 +18,9 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 import pandas as pd
+import json
+import hashlib
+from datetime import datetime
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent.absolute()
@@ -30,6 +33,7 @@ from core.config_gsheet import Config
 # Third-party imports
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 from dotenv import load_dotenv
 
 # Configure logging
@@ -58,10 +62,6 @@ class GoogleSheetsClient:
         Args:
             credentials_file: Path to service account JSON file.
                              If None, uses default path from paths.CREDENTIALS.
-                             
-        Raises:
-            FileNotFoundError: If credentials file doesn't exist
-            Exception: For authentication errors
         """
         # Set up logging
         self.logger = logger
@@ -76,21 +76,15 @@ class GoogleSheetsClient:
         self.scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/drive.metadata.readonly"
         ]
         
-        # Initialize client
-        self.client = self._authenticate()
+        # Initialize clients
+        self._authenticate()
         
-    def _authenticate(self) -> gspread.Client:
+    def _authenticate(self) -> None:
         """
-        Authenticate with Google Sheets API.
-        
-        Returns:
-            gspread.Client: Authenticated gspread client
-            
-        Raises:
-            FileNotFoundError: If credentials file doesn't exist
-            Exception: For authentication errors
+        Authenticate with Google APIs.
         """
         try:
             self.logger.info(f"Authenticating with credentials from: {self.credentials_file}")
@@ -100,10 +94,13 @@ class GoogleSheetsClient:
                 scopes=self.scopes
             )
             
-            client = gspread.authorize(creds)
-            self.logger.info("Authentication successful")
+            # Initialize gspread client
+            self.client = gspread.authorize(creds)
             
-            return client
+            # Initialize Drive API client
+            self.drive_service = build('drive', 'v3', credentials=creds)
+            
+            self.logger.info("Authentication successful")
             
         except FileNotFoundError:
             self.logger.error(f"Credentials file not found at {self.credentials_file}")
@@ -231,22 +228,12 @@ class GoogleSheetsClient:
                           output_dir: Optional[Path] = None,
                           filename: Optional[str] = None) -> Path:
         """
-        Download worksheet data to a file in the specified format.
-        
-        Args:
-            sheet_name: Name of the worksheet to download
-            sheet_index: Index of the worksheet if name not provided (default: 0)
-            spreadsheet_id: The spreadsheet ID (if None, uses Config value)
-            output_format: File format - "csv", "excel", or "json" (default: "csv")
-            output_dir: Directory to save the file (default: paths.SPREADSHEET_SOURCE)
-            filename: Custom filename without extension (default: worksheet name)
-            
-        Returns:
-            Path: Path to the downloaded file
-            
-        Raises:
-            ValueError: For unsupported output formats
+        Download worksheet data to a file and store metadata for change tracking.
         """
+        # Get spreadsheet_id if not provided
+        if spreadsheet_id is None:
+            spreadsheet_id = Config.get_sheet_id()
+        
         # Get data as DataFrame
         df = self.get_worksheet_as_dataframe(sheet_name, sheet_index, spreadsheet_id)
         
@@ -284,6 +271,40 @@ class GoogleSheetsClient:
         else:
             raise ValueError(f"Unsupported output format: {output_format}. "
                             "Supported formats: csv, excel, json")
+        
+        # Get worksheet metadata for change detection
+        try:
+            # Get file revision information from Drive API
+            revision_info = self.get_file_revision_info(spreadsheet_id)
+            
+            # Calculate data fingerprint
+            data_hash = hashlib.md5(df.to_csv().encode()).hexdigest()
+            
+            # Create metadata
+            metadata = {
+                "filename": output_path.name,
+                "worksheet_name": sheet_name,
+                "spreadsheet_id": spreadsheet_id,
+                "download_time": datetime.now().isoformat(),
+                "row_count": len(df),
+                "column_count": len(df.columns),
+                "columns": df.columns.tolist(),
+                "data_hash": data_hash,
+                "file_version": revision_info.get('version'),
+                "modified_time": revision_info.get('modified_time'),
+                "revision_id": revision_info.get('latest_revision_id'),
+                "revision_time": revision_info.get('latest_revision_time')
+            }
+            
+            # Save metadata alongside the data file
+            metadata_path = output_path.with_suffix('.meta.json')
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+                
+            self.logger.info(f"Metadata saved to {metadata_path}")
+        except Exception as e:
+            self.logger.error(f"Error saving metadata: {str(e)}")
+            # Continue without metadata - not critical
         
         self.logger.info(f"Data saved to {output_path}")
         return output_path
@@ -324,14 +345,14 @@ class GoogleSheetsClient:
                                       spreadsheet_id: Optional[str] = None,
                                       output_format: str = "csv") -> Optional[Path]:
         """
-        Interactive interface for selecting and downloading worksheets with intelligent updating.
+        Interactive interface for selecting and downloading worksheets.
         
         This method guides the user through:
         1. Connecting to the Google spreadsheet
         2. Listing available worksheets
         3. Selecting which worksheet to work with
-        4. Determining if data needs updating
-        5. Downloading only when necessary
+        4. Displaying metadata about the current sheet and local file
+        5. Letting user decide whether to download
         
         Args:
             spreadsheet_id: ID of the spreadsheet (if None, uses Config)
@@ -381,18 +402,11 @@ class GoogleSheetsClient:
             
             if file_exists:
                 print(f"\n🔄 Found existing file: {output_path}")
-                
-                # Compare with current data
-                try:
-                    should_download = self._check_for_updates(
-                        output_path, selected_worksheet, spreadsheet_id)
-                except Exception as e:
-                    self.logger.error(f"Error comparing files: {str(e)}")
-                    print(f"⚠️ Could not compare files: {str(e)}")
-                    should_download = self._prompt_download_confirmation()
             else:
-                print("\n🆕 No existing file found. Will download fresh data.")
-                should_download = True
+                print("\n🆕 No existing file found. Will be a first download.")
+            
+            # Display metadata and ask for confirmation
+            should_download = self._check_for_updates(output_path, selected_worksheet, spreadsheet_id)
             
             # Download if needed
             if should_download:
@@ -419,7 +433,10 @@ class GoogleSheetsClient:
                           worksheet_name: str,
                           spreadsheet_id: Optional[str] = None) -> bool:
         """
-        Compare local CSV file with current Google Sheet data to check for differences.
+        Display metadata about the local file and current Google Sheet.
+        
+        Shows available metadata without attempting automatic change detection,
+        letting the user decide whether to download based on the information.
         
         Args:
             file_path: Path to the local CSV file
@@ -427,63 +444,60 @@ class GoogleSheetsClient:
             spreadsheet_id: ID of the spreadsheet (if None, uses Config)
             
         Returns:
-            bool: True if updates are needed, False if data is identical
+            bool: True if user wants to download, False otherwise
         """
-        self.logger.info(f"Checking for updates between {file_path} and {worksheet_name}")
+        self.logger.info(f"Checking metadata for {file_path} and {worksheet_name}")
         
-        # Load local data
+        # Check for metadata file
+        metadata_path = file_path.with_suffix('.meta.json')
+        local_metadata_exists = metadata_path.exists()
+        
         try:
-            local_df = pd.read_csv(file_path)
-            local_records = local_df.to_dict('records')
-        except Exception as e:
-            self.logger.error(f"Error reading local file: {str(e)}")
-            print(f"⚠️ Error reading local file - will download fresh data")
-            return True
-        
-        # Get current sheet data
-        current_data = self.get_worksheet_data(worksheet_name, spreadsheet_id=spreadsheet_id)
-        
-        # Quick check: row count
-        if len(local_records) != len(current_data):
-            diff = len(current_data) - len(local_records)
-            print(f"🆕 Found {abs(diff)} {'new' if diff > 0 else 'fewer'} rows in the Google Sheet")
-            return self._prompt_download_confirmation()
-        
-        # Check for changes in existing data
-        try:
-            # Convert to sets of tuples for comparison (need hashable type)
-            # First, ensure both datasets have the same columns
-            all_keys = set()
-            for record in local_records + current_data:
-                all_keys.update(record.keys())
+            # Get spreadsheet_id if not provided
+            if spreadsheet_id is None:
+                spreadsheet_id = Config.get_sheet_id()
                 
-            # Convert to comparable format
-            def record_to_hashable(record, keys):
-                return tuple((k, record.get(k, None)) for k in sorted(keys))
-                
-            local_set = {record_to_hashable(r, all_keys) for r in local_records}
-            current_set = {record_to_hashable(r, all_keys) for r in current_data}
+            # Get current revision info - this provides useful metadata
+            current_revision = self.get_file_revision_info(spreadsheet_id)
             
-            # Find differences
-            new_records = current_set - local_set
-            removed_records = local_set - current_set
+            print("\n📋 Google Sheet Metadata:")
+            print(f"   - File name: {current_revision.get('name', 'Unknown')}")
+            print(f"   - Last modified: {current_revision.get('modified_time', 'Unknown')}")
+            print(f"   - Current version: {current_revision.get('version', 'Unknown')}")
+            print(f"   - Latest revision: {current_revision.get('latest_revision_id', 'Unknown')}")
             
-            if new_records or removed_records:
-                print(f"🔄 Found {len(new_records)} new and {len(removed_records)} removed items")
-                for i, record in enumerate(new_records, 1):
-                    if i <= 3:  # Show only first 3 differences
-                        print(f"  ➕ New: {dict(record)}")
-                    elif i == 4:
-                        print(f"  ... and {len(new_records) - 3} more changes")
-                        break
-                return self._prompt_download_confirmation()
+            # If we have local metadata, display it for comparison
+            if local_metadata_exists:
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                    
+                    print("\n📄 Local File Metadata:")
+                    print(f"   - Downloaded on: {metadata.get('download_time', 'Unknown')}")
+                    print(f"   - File version: {metadata.get('file_version', 'Unknown')}")
+                    print(f"   - Based on modified time: {metadata.get('modified_time', 'Unknown')}")
+                    print(f"   - Row count: {metadata.get('row_count', 'Unknown')}")
+                    print(f"   - Column count: {metadata.get('column_count', 'Unknown')}")
+                    
+                    # Check if there's been a version change
+                    if metadata.get('file_version') != current_revision.get('version'):
+                        print("\n⚠️ Version has changed since last download!")
+                    
+                    # Check if there's been a modification time change
+                    if metadata.get('modified_time') != current_revision.get('modified_time'):
+                        print("\n⚠️ File has been modified since last download!")
+                except Exception as e:
+                    print(f"\n⚠️ Error reading local metadata: {str(e)}")
             else:
-                print("✅ Local file is up to date with Google Sheet")
-                return self._prompt_download_confirmation(default=False)
+                print("\n📝 No local metadata found - this would be a first-time download.")
+                
+            # Let the user decide
+            default = not local_metadata_exists  # Default to Yes for new files, No for existing ones
+            return self._prompt_download_confirmation(default=default)
                 
         except Exception as e:
-            self.logger.error(f"Error comparing data: {str(e)}")
-            print(f"⚠️ Could not properly compare data: {str(e)}")
+            self.logger.error(f"Error fetching metadata: {str(e)}")
+            print(f"\n⚠️ Error fetching metadata: {str(e)}")
             return self._prompt_download_confirmation()
             
     def _prompt_download_confirmation(self, default: bool = True) -> bool:
@@ -509,6 +523,50 @@ class GoogleSheetsClient:
                 return False
             else:
                 print("Please answer with 'y' or 'n'")
+    
+       
+    def get_file_revision_info(self, file_id: str) -> Dict[str, Any]:
+        """
+        Get revision information for a Google Drive file.
+        
+        Args:
+            file_id: The ID of the file (spreadsheet)
+            
+        Returns:
+            Dict with revision information
+        """
+        try:
+            # Get file metadata from Drive API
+            file_metadata = self.drive_service.files().get(
+                fileId=file_id, 
+                fields="id,name,mimeType,modifiedTime,version"
+            ).execute()
+            
+            # Get list of revisions
+            revisions = self.drive_service.revisions().list(
+                fileId=file_id,
+                fields="revisions(id,modifiedTime,lastModifyingUser)"
+            ).execute()
+            
+            # Get the latest revision
+            latest_revision = None
+            if 'revisions' in revisions:
+                latest_revision = revisions['revisions'][-1] if revisions['revisions'] else None
+                
+            # Combine information
+            result = {
+                'file_id': file_id,
+                'name': file_metadata.get('name'),
+                'modified_time': file_metadata.get('modifiedTime'),
+                'version': file_metadata.get('version', '0'),
+                'latest_revision_id': latest_revision.get('id') if latest_revision else None,
+                'latest_revision_time': latest_revision.get('modifiedTime') if latest_revision else None,
+            }
+            
+            return result
+        except Exception as e:
+            self.logger.error(f"Error getting file revision info: {str(e)}")
+            raise
 
 
 def main():
