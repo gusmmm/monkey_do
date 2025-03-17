@@ -320,6 +320,196 @@ class GoogleSheetsClient:
         
         return results
 
+    def interactive_worksheet_download(self, 
+                                      spreadsheet_id: Optional[str] = None,
+                                      output_format: str = "csv") -> Optional[Path]:
+        """
+        Interactive interface for selecting and downloading worksheets with intelligent updating.
+        
+        This method guides the user through:
+        1. Connecting to the Google spreadsheet
+        2. Listing available worksheets
+        3. Selecting which worksheet to work with
+        4. Determining if data needs updating
+        5. Downloading only when necessary
+        
+        Args:
+            spreadsheet_id: ID of the spreadsheet (if None, uses Config)
+            output_format: Format to save data in ("csv", "excel", or "json")
+            
+        Returns:
+            Path: Path to the downloaded file if successful, otherwise None
+        """
+        try:
+            # Connect to spreadsheet
+            self.logger.info("Connecting to Google Spreadsheet...")
+            spreadsheet = self.open_spreadsheet(spreadsheet_id)
+            print(f"\n📊 Connected to: '{spreadsheet.title}'")
+            
+            # Get available worksheets
+            worksheet_names = self.list_worksheets(spreadsheet_id)
+            if not worksheet_names:
+                print("❌ No worksheets found in this spreadsheet.")
+                return None
+            
+            # Display worksheet selection menu
+            print("\n🔍 Available worksheets:")
+            for i, name in enumerate(worksheet_names, 1):
+                print(f"  {i}. {name}")
+            
+            # Get user selection
+            while True:
+                try:
+                    selection = input("\n👉 Enter worksheet number to download: ")
+                    index = int(selection) - 1
+                    if 0 <= index < len(worksheet_names):
+                        selected_worksheet = worksheet_names[index]
+                        break
+                    else:
+                        print(f"❌ Please enter a number between 1 and {len(worksheet_names)}")
+                except ValueError:
+                    print("❌ Please enter a valid number")
+            
+            print(f"\n✅ Selected: '{selected_worksheet}'")
+            
+            # Determine output path
+            filename = selected_worksheet.replace(' ', '_').replace('/', '_')
+            output_path = paths.SPREADSHEET_SOURCE / f"{filename}.{output_format}"
+            
+            # Check if file already exists
+            file_exists = output_path.exists()
+            
+            if file_exists:
+                print(f"\n🔄 Found existing file: {output_path}")
+                
+                # Compare with current data
+                try:
+                    should_download = self._check_for_updates(
+                        output_path, selected_worksheet, spreadsheet_id)
+                except Exception as e:
+                    self.logger.error(f"Error comparing files: {str(e)}")
+                    print(f"⚠️ Could not compare files: {str(e)}")
+                    should_download = self._prompt_download_confirmation()
+            else:
+                print("\n🆕 No existing file found. Will download fresh data.")
+                should_download = True
+            
+            # Download if needed
+            if should_download:
+                print(f"\n⬇️ Downloading '{selected_worksheet}' to {output_path}")
+                result_path = self.download_worksheet(
+                    sheet_name=selected_worksheet,
+                    spreadsheet_id=spreadsheet_id,
+                    output_format=output_format,
+                    filename=filename
+                )
+                print(f"✅ Download complete: {result_path}")
+                return result_path
+            else:
+                print("\n⏭️ Skipping download as requested.")
+                return output_path if file_exists else None
+                
+        except Exception as e:
+            self.logger.error(f"Error in interactive download: {str(e)}")
+            print(f"\n❌ Error: {str(e)}")
+            return None
+            
+    def _check_for_updates(self, 
+                          file_path: Path, 
+                          worksheet_name: str,
+                          spreadsheet_id: Optional[str] = None) -> bool:
+        """
+        Compare local CSV file with current Google Sheet data to check for differences.
+        
+        Args:
+            file_path: Path to the local CSV file
+            worksheet_name: Name of the worksheet to compare
+            spreadsheet_id: ID of the spreadsheet (if None, uses Config)
+            
+        Returns:
+            bool: True if updates are needed, False if data is identical
+        """
+        self.logger.info(f"Checking for updates between {file_path} and {worksheet_name}")
+        
+        # Load local data
+        try:
+            local_df = pd.read_csv(file_path)
+            local_records = local_df.to_dict('records')
+        except Exception as e:
+            self.logger.error(f"Error reading local file: {str(e)}")
+            print(f"⚠️ Error reading local file - will download fresh data")
+            return True
+        
+        # Get current sheet data
+        current_data = self.get_worksheet_data(worksheet_name, spreadsheet_id=spreadsheet_id)
+        
+        # Quick check: row count
+        if len(local_records) != len(current_data):
+            diff = len(current_data) - len(local_records)
+            print(f"🆕 Found {abs(diff)} {'new' if diff > 0 else 'fewer'} rows in the Google Sheet")
+            return self._prompt_download_confirmation()
+        
+        # Check for changes in existing data
+        try:
+            # Convert to sets of tuples for comparison (need hashable type)
+            # First, ensure both datasets have the same columns
+            all_keys = set()
+            for record in local_records + current_data:
+                all_keys.update(record.keys())
+                
+            # Convert to comparable format
+            def record_to_hashable(record, keys):
+                return tuple((k, record.get(k, None)) for k in sorted(keys))
+                
+            local_set = {record_to_hashable(r, all_keys) for r in local_records}
+            current_set = {record_to_hashable(r, all_keys) for r in current_data}
+            
+            # Find differences
+            new_records = current_set - local_set
+            removed_records = local_set - current_set
+            
+            if new_records or removed_records:
+                print(f"🔄 Found {len(new_records)} new and {len(removed_records)} removed items")
+                for i, record in enumerate(new_records, 1):
+                    if i <= 3:  # Show only first 3 differences
+                        print(f"  ➕ New: {dict(record)}")
+                    elif i == 4:
+                        print(f"  ... and {len(new_records) - 3} more changes")
+                        break
+                return self._prompt_download_confirmation()
+            else:
+                print("✅ Local file is up to date with Google Sheet")
+                return self._prompt_download_confirmation(default=False)
+                
+        except Exception as e:
+            self.logger.error(f"Error comparing data: {str(e)}")
+            print(f"⚠️ Could not properly compare data: {str(e)}")
+            return self._prompt_download_confirmation()
+            
+    def _prompt_download_confirmation(self, default: bool = True) -> bool:
+        """
+        Ask user to confirm download.
+        
+        Args:
+            default: Default answer if user just presses Enter
+            
+        Returns:
+            bool: True if user confirms, False otherwise
+        """
+        default_text = "Y/n" if default else "y/N"
+        while True:
+            response = input(f"\n❓ Download/update the file? [{default_text}]: ").strip().lower()
+            
+            if not response:  # Empty response, use default
+                return default
+                
+            if response in ('y', 'yes'):
+                return True
+            elif response in ('n', 'no'):
+                return False
+            else:
+                print("Please answer with 'y' or 'n'")
+
 
 def main():
     """
@@ -333,18 +523,9 @@ def main():
         # Initialize client
         gs_client = GoogleSheetsClient()
         
-        # List all worksheets in default spreadsheet
-        worksheets = gs_client.list_worksheets()
-        print(f"Available worksheets: {', '.join(worksheets)}")
-        
-        # Download a specific worksheet as CSV
-        if worksheets:
-            output_path = gs_client.download_worksheet(sheet_name=worksheets[0])
-            print(f"Downloaded first worksheet to: {output_path}")
-        
-        # Optional: Download all worksheets
-        # results = gs_client.download_all_worksheets()
-        # print(f"Downloaded {len(results)} worksheets")
+        # Use the interactive function
+        print("\n🌟 Interactive Google Sheets Downloader 🌟\n")
+        gs_client.interactive_worksheet_download()
             
     except Exception as e:
         print(f"Error: {str(e)}")

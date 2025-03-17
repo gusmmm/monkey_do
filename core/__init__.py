@@ -1,9 +1,10 @@
 """
-Core package for the Monkey Do project.
-Contains fundamental components and utilities used throughout the application.
+Core functionality for the Monkey Do project.
+
+This package contains fundamental components used throughout
+the application, including path management and configuration.
 """
-from .paths import paths, ProjectPaths
+from .paths import paths
 from .config_gsheet import Config
 
-# Export the paths singleton for easy imports
-__all__ = ['paths', 'ProjectPaths', 'Config']
+__all__ = ['paths', 'Config']
