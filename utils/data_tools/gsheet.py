@@ -15,6 +15,7 @@ Technical decisions:
 import sys
 import os
 import logging
+import time  # Add this import1
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 import pandas as pd
@@ -230,10 +231,6 @@ class GoogleSheetsClient:
         """
         Download worksheet data to a file and store metadata for change tracking.
         """
-        # Get spreadsheet_id if not provided
-        if spreadsheet_id is None:
-            spreadsheet_id = Config.get_sheet_id()
-        
         # Get data as DataFrame
         df = self.get_worksheet_as_dataframe(sheet_name, sheet_index, spreadsheet_id)
         
@@ -272,11 +269,8 @@ class GoogleSheetsClient:
             raise ValueError(f"Unsupported output format: {output_format}. "
                             "Supported formats: csv, excel, json")
         
-        # Get worksheet metadata for change detection
+        # Create metadata with focus on data hash and revision tracking
         try:
-            # Get file revision information from Drive API
-            revision_info = self.get_file_revision_info(spreadsheet_id)
-            
             # Calculate data fingerprint
             data_hash = hashlib.md5(df.to_csv().encode()).hexdigest()
             
@@ -290,11 +284,29 @@ class GoogleSheetsClient:
                 "column_count": len(df.columns),
                 "columns": df.columns.tolist(),
                 "data_hash": data_hash,
-                "file_version": revision_info.get('version'),
-                "modified_time": revision_info.get('modified_time'),
-                "revision_id": revision_info.get('latest_revision_id'),
-                "revision_time": revision_info.get('latest_revision_time')
+                # Copy revision ID from existing metadata if available
+                "revision_id": str(int(time.time())),  # Use timestamp as a revision placeholder
             }
+            
+            # Check if previous metadata exists to preserve revision info
+            prev_metadata_path = output_path.with_suffix('.meta.json')
+            if prev_metadata_path.exists():
+                try:
+                    with open(prev_metadata_path, 'r') as f:
+                        prev_metadata = json.load(f)
+                        # If hash is the same, keep the previous revision ID
+                        if prev_metadata.get('data_hash') == data_hash:
+                            metadata['revision_id'] = prev_metadata.get('revision_id', metadata['revision_id'])
+                        else:
+                            # If content changed, increment the revision ID
+                            try:
+                                old_rev = int(prev_metadata.get('revision_id', '0'))
+                                metadata['revision_id'] = str(old_rev + 1)
+                            except:
+                                # If revision ID isn't numeric, use timestamp
+                                pass
+                except:
+                    pass
             
             # Save metadata alongside the data file
             metadata_path = output_path.with_suffix('.meta.json')
@@ -433,10 +445,10 @@ class GoogleSheetsClient:
                           worksheet_name: str,
                           spreadsheet_id: Optional[str] = None) -> bool:
         """
-        Display metadata about the local file and current Google Sheet.
+        Display metadata focusing on revision ID comparison.
         
-        Shows available metadata without attempting automatic change detection,
-        letting the user decide whether to download based on the information.
+        Shows revision IDs from both local metadata and the current sheet,
+        letting the user decide whether to download based on this comparison.
         
         Args:
             file_path: Path to the local CSV file
@@ -446,25 +458,28 @@ class GoogleSheetsClient:
         Returns:
             bool: True if user wants to download, False otherwise
         """
-        self.logger.info(f"Checking metadata for {file_path} and {worksheet_name}")
+        self.logger.info(f"Checking revision info for {file_path} and {worksheet_name}")
         
         # Check for metadata file
         metadata_path = file_path.with_suffix('.meta.json')
         local_metadata_exists = metadata_path.exists()
         
         try:
-            # Get spreadsheet_id if not provided
-            if spreadsheet_id is None:
-                spreadsheet_id = Config.get_sheet_id()
-                
-            # Get current revision info - this provides useful metadata
-            current_revision = self.get_file_revision_info(spreadsheet_id)
+            # Get spreadsheet info using gspread
+            spreadsheet = self.open_spreadsheet(spreadsheet_id)
+            worksheet = spreadsheet.worksheet(worksheet_name)
             
-            print("\n📋 Google Sheet Metadata:")
-            print(f"   - File name: {current_revision.get('name', 'Unknown')}")
-            print(f"   - Last modified: {current_revision.get('modified_time', 'Unknown')}")
-            print(f"   - Current version: {current_revision.get('version', 'Unknown')}")
-            print(f"   - Latest revision: {current_revision.get('latest_revision_id', 'Unknown')}")
+            # Get current data and calculate hash
+            current_data = self.get_worksheet_data(worksheet_name, spreadsheet_id)
+            current_df = pd.DataFrame(current_data)
+            current_hash = hashlib.md5(current_df.to_csv().encode()).hexdigest()
+            
+            print("\n📋 Google Sheet Info:")
+            print(f"   - Spreadsheet title: {spreadsheet.title}")
+            print(f"   - Worksheet: {worksheet.title}")
+            print(f"   - Current row count: {len(current_data)}")
+            print(f"   - Current column count: {len(current_df.columns) if not current_df.empty else 0}")
+            print(f"   - Current data hash: {current_hash}")
             
             # If we have local metadata, display it for comparison
             if local_metadata_exists:
@@ -474,18 +489,26 @@ class GoogleSheetsClient:
                     
                     print("\n📄 Local File Metadata:")
                     print(f"   - Downloaded on: {metadata.get('download_time', 'Unknown')}")
-                    print(f"   - File version: {metadata.get('file_version', 'Unknown')}")
-                    print(f"   - Based on modified time: {metadata.get('modified_time', 'Unknown')}")
-                    print(f"   - Row count: {metadata.get('row_count', 'Unknown')}")
-                    print(f"   - Column count: {metadata.get('column_count', 'Unknown')}")
                     
-                    # Check if there's been a version change
-                    if metadata.get('file_version') != current_revision.get('version'):
-                        print("\n⚠️ Version has changed since last download!")
+                    # Display revision IDs for comparison
+                    local_revision_id = metadata.get('revision_id', 'Unknown')
+                    print(f"   - Local revision ID: {local_revision_id}")
                     
-                    # Check if there's been a modification time change
-                    if metadata.get('modified_time') != current_revision.get('modified_time'):
-                        print("\n⚠️ File has been modified since last download!")
+                    # Display previous hash
+                    local_hash = metadata.get('data_hash', 'Unknown')
+                    print(f"   - Local data hash: {local_hash}")
+                    
+                    # Compare hashes to detect content changes
+                    if local_hash != current_hash:
+                        print("\n⚠️ Data content has changed since last download!")
+                    else:
+                        print("\n✅ Data content appears to be identical")
+                        
+                    # Display row count comparison
+                    local_row_count = metadata.get('row_count', 0)
+                    if local_row_count != len(current_data):
+                        print(f"⚠️ Row count changed: {local_row_count} → {len(current_data)}")
+                        
                 except Exception as e:
                     print(f"\n⚠️ Error reading local metadata: {str(e)}")
             else:
@@ -496,8 +519,8 @@ class GoogleSheetsClient:
             return self._prompt_download_confirmation(default=default)
                 
         except Exception as e:
-            self.logger.error(f"Error fetching metadata: {str(e)}")
-            print(f"\n⚠️ Error fetching metadata: {str(e)}")
+            self.logger.error(f"Error fetching worksheet info: {str(e)}")
+            print(f"\n⚠️ Error fetching worksheet info: {str(e)}")
             return self._prompt_download_confirmation()
             
     def _prompt_download_confirmation(self, default: bool = True) -> bool:
