@@ -15,7 +15,7 @@ Technical decisions:
 import sys
 import os
 import logging
-import time  # Add this import1
+import time  # Add this import
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 import pandas as pd
@@ -222,12 +222,12 @@ class GoogleSheetsClient:
         return pd.DataFrame(data)
     
     def download_worksheet(self, 
-                          sheet_name: Optional[str] = None, 
-                          sheet_index: int = 0,
-                          spreadsheet_id: Optional[str] = None,
-                          output_format: str = "csv",
-                          output_dir: Optional[Path] = None,
-                          filename: Optional[str] = None) -> Path:
+                      sheet_name: Optional[str] = None, 
+                      sheet_index: int = 0,
+                      spreadsheet_id: Optional[str] = None,
+                      output_format: str = "csv",
+                      output_dir: Optional[Path] = None,
+                      filename: Optional[str] = None) -> Path:
         """
         Download worksheet data to a file and store metadata for change tracking.
         """
@@ -238,9 +238,21 @@ class GoogleSheetsClient:
             self.logger.warning("No data found in worksheet")
             return None
         
-        # Determine output directory
-        if output_dir is None:
-            output_dir = paths.SPREADSHEET_SOURCE
+        # Fix only the exact "ID" column to preserve leading zeros (not all columns containing "ID")
+        if "ID" in df.columns:
+            # Convert ID column to string type
+            df["ID"] = df["ID"].astype(str)
+            
+            # if ID value only has 3 digits, add one leading zero
+            df["ID"] = df["ID"].apply(lambda x: x.zfill(4) if len(x) < 4 else x)
+            # Ensure the ID column is treated as a string to preserve leading zeros
+            # This is important for IDs like "0025" to remain "0025" in the output
+            
+        
+            
+            # Determine output directory
+            if output_dir is None:
+                output_dir = paths.SPREADSHEET_SOURCE
         
         # Ensure output directory exists
         output_dir.mkdir(parents=True, exist_ok=True)
