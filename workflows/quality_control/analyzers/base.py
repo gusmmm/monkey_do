@@ -22,4 +22,7 @@ class BaseAnalyzer(ABC):
     
     def get_results(self) -> Dict[str, Any]:
         """Return the analysis results."""
+        # Make sure we're returning a dictionary
+        if not isinstance(self.results, dict):
+            return {}
         return self.results

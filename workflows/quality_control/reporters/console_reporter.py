@@ -379,15 +379,22 @@ class ConsoleReporter:
     
     def _print_row_list(self, rows: List[int], limit: int = 10) -> None:
         """Helper to print a list of row numbers with limit."""
-        # Add 2 to row index (1 for 0-indexing, 1 for header row in CSV)
-        row_nums = [r + 2 for r in rows]
+        if not rows:
+            return
+            
+        # Convert all entries to integers explicitly
+        try:
+            row_nums = [int(r) + 2 for r in rows if isinstance(r, (int, float))]
+        except Exception:
+            print("   Warning: Unable to parse row numbers properly")
+            return
         
         if len(row_nums) <= limit:
             rows_display = ", ".join(str(row) for row in row_nums)
         else:
             first_rows = ", ".join(str(row) for row in row_nums[:limit])
             rows_display = f"{first_rows}, ... ({len(row_nums) - limit} more)"
-            
+                
         print(f"   Rows with issues: {rows_display}")
 
     def report_processo_analysis(self, results: Dict[str, Any]) -> None:

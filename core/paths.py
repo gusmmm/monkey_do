@@ -41,6 +41,9 @@ class ProjectPaths:
         self.MARKDOWN = self.DATA_PROCESSED / "markdown"
         self.JSON = self.DATA_PROCESSED / "json"
         
+        # Reports directory
+        self.REPORTS = self.DATA / "reports"
+        
         # Create all directories
         self._create_directories()
     
@@ -51,7 +54,7 @@ class ProjectPaths:
             self.DATA, self.FRONTEND, self.BACKEND,
             self.DATA_SOURCE, self.PDF_SOURCE, self.SPREADSHEET_SOURCE,
             self.DATA_PROCESSED, self.MARKDOWN, self.JSON,
-            self.CREDENTIALS,
+            self.CREDENTIALS, self.REPORTS,
         ]
         
         for directory in directories:

@@ -164,10 +164,11 @@ class CategoricalAnalyzer(BaseAnalyzer):
             missing_rows = self.df[missing_values]
             for i, (idx, row) in enumerate(missing_rows.iterrows()):
                 if i < 10:  # Limit to 10 examples
-                    result['examples'].append({
-                        'id': row['ID'],
+                    example = {
+                        'id': row['ID'] if 'ID' in row else "Unknown",
                         'row': idx
-                    })
+                    }
+                    result['examples'].append(example)
         
         return result
     
