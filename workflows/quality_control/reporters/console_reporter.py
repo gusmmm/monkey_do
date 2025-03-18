@@ -389,3 +389,125 @@ class ConsoleReporter:
             rows_display = f"{first_rows}, ... ({len(row_nums) - limit} more)"
             
         print(f"   Rows with issues: {rows_display}")
+
+    def report_processo_analysis(self, results: Dict[str, Any]) -> None:
+        """Format processo column analysis results for console."""
+        print("\n" + "="*80)
+        print("📝 PROCESSO (MEDICAL RECORD) ANALYSIS")
+        print("="*80)
+        
+        # Report missing values
+        missing = results.get('missing', {})
+        print("\n🔍 Missing Values Analysis:")
+        if missing.get('count', 0) == 0:
+            print("   ✅ No missing processo values found")
+        else:
+            print(f"   ⚠️ Found {missing['count']} missing processo values ({missing['percentage']:.2%} of total records)")
+            print("\n   Examples of records with missing processo:")
+            
+            for i, example in enumerate(missing.get('examples', []), 1):
+                print(f"   {i}. ID '{example['id']}' at row {example['row'] + 2}")
+        
+        # Report invalid values
+        invalid = results.get('invalid', {})
+        print("\n🔢 Non-numeric Values Analysis:")
+        if invalid.get('count', 0) == 0:
+            print("   ✅ All processo values are numeric")
+        else:
+            print(f"   ⚠️ Found {invalid['count']} non-numeric processo values ({invalid['percentage']:.2%} of non-missing values)")
+            print("\n   Examples of records with non-numeric processo values:")
+            
+            for i, example in enumerate(invalid.get('examples', []), 1):
+                print(f"   {i}. ID '{example['id']}' has '{example['value']}' at row {example['row'] + 2}")
+        
+        print("\n" + "="*80)
+
+    def report_nome_analysis(self, results: Dict[str, Any]) -> None:
+        """Format nome column analysis results for console."""
+        print("\n" + "="*80)
+        print("👤 PATIENT NAME ANALYSIS")
+        print("="*80)
+        
+        # Report missing values
+        missing = results.get('missing', {})
+        print("\n🔍 Missing Names Analysis:")
+        if missing.get('count', 0) == 0:
+            print("   ✅ No missing patient names found")
+        else:
+            print(f"   ⚠️ Found {missing['count']} missing patient names ({missing['percentage']:.2%} of total records)")
+            print("\n   Records with missing names:")
+            
+            for i, example in enumerate(missing.get('examples', []), 1):
+                print(f"   {i}. ID '{example['id']}' at row {example['row'] + 2}")
+        
+        print("\n" + "="*80)
+
+    def report_categorical_analysis(self, results: Dict[str, Any], column_name: str, title: str) -> None:
+        """Format categorical column analysis results for console."""
+        print("\n" + "="*80)
+        print(f"{title}")
+        print("="*80)
+        
+        # Report missing values
+        missing = results.get('missing', {})
+        print(f"\n🔍 Missing {column_name.capitalize()} Analysis:")
+        if missing.get('count', 0) == 0:
+            print(f"   ✅ No missing {column_name} values found")
+        else:
+            print(f"   ⚠️ Found {missing['count']} missing {column_name} values ({missing['percentage']:.2%} of total records)")
+            print(f"\n   Records with missing {column_name}:")
+            
+            for i, example in enumerate(missing.get('examples', []), 1):
+                print(f"   {i}. ID '{example['id']}' at row {example['row'] + 2}")
+        
+        # Report value frequencies
+        frequencies = results.get('frequency', {})
+        print(f"\n📊 {column_name.capitalize()} Value Distribution:")
+        
+        if frequencies.get('unique_count', 0) == 0:
+            print(f"   ℹ️ No {column_name} values found (all missing)")
+        else:
+            print(f"   Found {frequencies['unique_count']} unique {column_name} values")
+            print(f"\n   Frequency breakdown:")
+            
+            # Sort by frequency (descending)
+            sorted_values = sorted(
+                frequencies.get('frequencies', {}).items(),
+                key=lambda x: x[1]['count'], 
+                reverse=True
+            )
+            
+            for value, details in sorted_values:
+                count = details['count']
+                percentage = details['percentage']
+                bar_length = int(percentage * 40)  # Scale for reasonable bar length
+                bar = "█" * bar_length
+                print(f"   {value:15} : {count:4d} ({percentage:6.2%}) {bar}")
+        
+        # Report unexpected values if applicable
+        unexpected = results.get('unexpected', {})
+        if unexpected is not None and 'count' in unexpected:
+            print(f"\n⚠️ Unexpected {column_name.capitalize()} Values:")
+            
+            if unexpected.get('count', 0) == 0:
+                print(f"   ✅ All {column_name} values match expected format")
+            else:
+                print(f"   ⚠️ Found {unexpected['count']} unexpected {column_name} values ({unexpected['percentage']:.2%} of non-missing values)")
+                print(f"\n   Examples of unexpected values:")
+                
+                for i, example in enumerate(unexpected.get('examples', []), 1):
+                    print(f"   {i}. ID '{example['id']}' has '{example['value']}' at row {example['row'] + 2}")
+        
+        print("\n" + "="*80)
+
+    def report_sexo_analysis(self, results: Dict[str, Any]) -> None:
+        """Format sexo column analysis results for console."""
+        self.report_categorical_analysis(results, "sexo", "👫 PATIENT SEX/GENDER ANALYSIS")
+
+    def report_destino_analysis(self, results: Dict[str, Any]) -> None:
+        """Format destino column analysis results for console."""
+        self.report_categorical_analysis(results, "destino", "🏥 PATIENT DESTINATION ANALYSIS")
+
+    def report_origem_analysis(self, results: Dict[str, Any]) -> None:
+        """Format origem column analysis results for console."""
+        self.report_categorical_analysis(results, "origem", "🚑 PATIENT ORIGIN ANALYSIS")

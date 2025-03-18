@@ -10,6 +10,10 @@ from .analyzers.id_analyzer import IDAnalyzer
 from .analyzers.admission_analyzer import AdmissionDateAnalyzer
 from .analyzers.discharge_analyzer import DischargeDateAnalyzer
 from .analyzers.birth_analyzer import BirthDateAnalyzer
+from .analyzers.other_analyzers import (
+    ProcessoAnalyzer, NomeAnalyzer, SexoAnalyzer, 
+    DestinoAnalyzer, OrigemAnalyzer
+)
 
 # Import reporters
 from .reporters.console_reporter import ConsoleReporter
@@ -83,6 +87,31 @@ def run_quality_control(csv_path: Path = None) -> int:
         birth_analyzer = BirthDateAnalyzer(df)
         if birth_analyzer.is_applicable():
             reporter.report_birth_analysis(birth_analyzer.analyze())
+        
+        # Run processo analysis
+        processo_analyzer = ProcessoAnalyzer(df)
+        if processo_analyzer.is_applicable():
+            reporter.report_processo_analysis(processo_analyzer.analyze())
+
+        # Run nome analysis
+        nome_analyzer = NomeAnalyzer(df)
+        if nome_analyzer.is_applicable():
+            reporter.report_nome_analysis(nome_analyzer.analyze())
+
+        # Run sexo analysis
+        sexo_analyzer = SexoAnalyzer(df)
+        if sexo_analyzer.is_applicable():
+            reporter.report_sexo_analysis(sexo_analyzer.analyze())
+
+        # Run destino analysis
+        destino_analyzer = DestinoAnalyzer(df)
+        if destino_analyzer.is_applicable():
+            reporter.report_destino_analysis(destino_analyzer.analyze())
+
+        # Run origem analysis
+        origem_analyzer = OrigemAnalyzer(df)
+        if origem_analyzer.is_applicable():
+            reporter.report_origem_analysis(origem_analyzer.analyze())
         
         print("\n✅ Quality control analysis completed successfully")
         return 0
