@@ -1,0 +1,1 @@
+- when creating print messages to the console, use always an output format that is clean, separates clearly the sections of the ouput, is beautiful and easy to read for a human. It is meant to be for information and to follow the flow of events. The output should be informative and relevant to a human.

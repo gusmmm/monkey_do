@@ -298,6 +298,108 @@ def analyze_id_pattern_consistency(df: pd.DataFrame) -> None:
     print("\n" + "="*80)
 
 
+def analyze_admission_dates(df: pd.DataFrame) -> None:
+    """
+    Analyze the admission dates (data_ent column) for:
+    - Missing values
+    - Proper date format (dd-mm-yyyy)
+    - Year consistency with ID prefix (ID should start with year's last 2 digits)
+    
+    Args:
+        df: DataFrame containing the patient data
+    """
+    print("\n" + "="*80)
+    print("📅 ADMISSION DATE ANALYSIS")
+    print("="*80)
+    
+    # Check if data_ent column exists
+    if 'data_ent' not in df.columns:
+        print("\n⚠️ Warning: 'data_ent' column not found in the dataset!")
+        return
+    
+    # 1. Check for missing values
+    missing_dates = df['data_ent'].isna() | (df['data_ent'] == '')
+    missing_count = missing_dates.sum()
+    
+    print("\n🔍 Missing Date Analysis:")
+    if missing_count == 0:
+        print("   ✅ No missing admission dates found")
+    else:
+        print(f"   ⚠️ Found {missing_count} missing admission dates ({missing_count/len(df):.2%} of total records)")
+        print("\n   Rows with missing admission dates:")
+        missing_rows = df[missing_dates].index + 2  # +2 for 1-indexing and header row
+        
+        # Show up to 10 missing rows, with ellipsis if more
+        if len(missing_rows) <= 10:
+            missing_rows_display = ", ".join(str(row) for row in missing_rows)
+        else:
+            first_rows = ", ".join(str(row) for row in missing_rows[:10])
+            missing_rows_display = f"{first_rows}, ... ({len(missing_rows) - 10} more)"
+            
+        print(f"   {missing_rows_display}")
+    
+    # 2. Check date format
+    print("\n📋 Date Format Analysis:")
+    
+    # Regular expression for dd-mm-yyyy format (allowing single digits for day/month)
+    date_pattern = r'^\d{1,2}-\d{1,2}-\d{4}$'
+    
+    # Filter rows with non-empty dates
+    date_df = df[~missing_dates].copy()
+    
+    # Check format using regex
+    invalid_format = ~date_df['data_ent'].astype(str).str.match(date_pattern)
+    invalid_count = invalid_format.sum()
+    
+    if invalid_count == 0:
+        print("   ✅ All dates follow the expected format (dd-mm-yyyy)")
+    else:
+        print(f"   ⚠️ Found {invalid_count} dates with unexpected format")
+        print("\n   Records with invalid date formats:")
+        
+        invalid_dates = date_df[invalid_format]
+        for i, (idx, row) in enumerate(invalid_dates.iterrows(), 1):
+            if i <= 10:
+                print(f"   {i}. ID '{row['ID']}' has date '{row['data_ent']}' at row {idx + 2}")
+            else:
+                print(f"      ... and {len(invalid_dates) - 10} more")
+                break
+    
+    # 3. Compare year in date with ID prefix
+    print("\n🔄 Year Consistency Check:")
+    
+    # Try to convert dates to datetime objects
+    try:
+        # Convert to datetime for valid format dates only
+        date_df = date_df[~invalid_format].copy()
+        date_df['date_obj'] = pd.to_datetime(date_df['data_ent'], format='%d-%m-%Y', errors='coerce')
+        date_df['year'] = date_df['date_obj'].dt.year
+        date_df['year_suffix'] = date_df['year'].astype(str).str[-2:]
+        date_df['id_prefix'] = date_df['ID'].astype(str).str[:2]
+        
+        # Find inconsistencies
+        inconsistent = date_df['year_suffix'] != date_df['id_prefix']
+        inconsistent_count = inconsistent.sum()
+        
+        if inconsistent_count == 0:
+            print("   ✅ All IDs match their admission year (first 2 digits of ID = last 2 digits of year)")
+        else:
+            print(f"   ⚠️ Found {inconsistent_count} IDs that don't match their admission year")
+            print("\n   ID vs. Year inconsistencies:")
+            
+            inconsistent_rows = date_df[inconsistent]
+            for i, (idx, row) in enumerate(inconsistent_rows.iterrows(), 1):
+                if i <= 20:  # Show more of these since they're important
+                    print(f"   {i}. ID '{row['ID']}' (prefix '{row['id_prefix']}') has date '{row['data_ent']}' (year '{row['year']}') at row {idx + 2}")
+                else:
+                    print(f"      ... and {len(inconsistent_rows) - 20} more")
+                    break
+    except Exception as e:
+        print(f"   ⚠️ Error analyzing date consistency: {str(e)}")
+    
+    print("\n" + "="*80)
+
+
 def main():
     """
     Main quality control workflow.
@@ -320,6 +422,10 @@ def main():
         
         # Analyze ID pattern consistency
         analyze_id_pattern_consistency(df)
+        
+        # Analyze admission dates
+        analyze_admission_dates(df)
+
         
     except Exception as e:
         logger.error(f"Quality control failed: {str(e)}")
