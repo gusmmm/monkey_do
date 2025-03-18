@@ -400,6 +400,128 @@ def analyze_admission_dates(df: pd.DataFrame) -> None:
     print("\n" + "="*80)
 
 
+def analyze_discharge_dates(df: pd.DataFrame) -> None:
+    """
+    Analyze the discharge dates (data_alta column) for:
+    - Proper date format (dd-mm-yyyy)
+    - Chronological order (data_alta >= data_ent)
+    
+    Args:
+        df: DataFrame containing the patient data
+    """
+    print("\n" + "="*80)
+    print("📤 DISCHARGE DATE ANALYSIS")
+    print("="*80)
+    
+    # Check if data_alta and data_ent columns exist
+    if 'data_alta' not in df.columns:
+        print("\n⚠️ Warning: 'data_alta' column not found in the dataset!")
+        return
+    
+    if 'data_ent' not in df.columns:
+        print("\n⚠️ Warning: 'data_ent' column not found, cannot compare with admission dates!")
+        return
+    
+    # 1. Check date format
+    print("\n📋 Date Format Analysis:")
+    
+    # Regular expression for dd-mm-yyyy format (allowing single digits for day/month)
+    date_pattern = r'^\d{1,2}-\d{1,2}-\d{4}$'
+    
+    # Filter rows with non-empty discharge dates
+    non_empty_dates = ~(df['data_alta'].isna() | (df['data_alta'] == ''))
+    date_df = df[non_empty_dates].copy()
+    
+    # Check format using regex
+    invalid_format = ~date_df['data_alta'].astype(str).str.match(date_pattern)
+    invalid_count = invalid_format.sum()
+    
+    if invalid_count == 0:
+        print("   ✅ All discharge dates follow the expected format (dd-mm-yyyy)")
+    else:
+        print(f"   ⚠️ Found {invalid_count} discharge dates with unexpected format")
+        print("\n   Records with invalid date formats:")
+        
+        invalid_dates = date_df[invalid_format]
+        for i, (idx, row) in enumerate(invalid_dates.iterrows(), 1):
+            if i <= 10:
+                print(f"   {i}. ID '{row['ID']}' has discharge date '{row['data_alta']}' at row {idx + 2}")
+            else:
+                print(f"      ... and {len(invalid_dates) - 10} more")
+                break
+    
+    # 2. Compare discharge dates with admission dates
+    print("\n🔄 Chronology Check (discharge date >= admission date):")
+    
+    # Try to convert dates to datetime objects
+    try:
+        # Filter for rows with both dates present and in valid format
+        valid_dates_df = df[
+            (~df['data_ent'].isna()) & 
+            (~df['data_alta'].isna()) & 
+            (df['data_ent'] != '') & 
+            (df['data_alta'] != '')
+        ].copy()
+        
+        # Skip empty dataset
+        if len(valid_dates_df) == 0:
+            print("   ℹ️ No records with both admission and discharge dates found")
+            print("\n" + "="*80)
+            return
+        
+        # Filter for rows with valid date formats
+        admission_date_pattern = valid_dates_df['data_ent'].astype(str).str.match(date_pattern)
+        discharge_date_pattern = valid_dates_df['data_alta'].astype(str).str.match(date_pattern)
+        valid_format_df = valid_dates_df[admission_date_pattern & discharge_date_pattern].copy()
+        
+        # Convert to datetime for comparison
+        valid_format_df['admission_date'] = pd.to_datetime(valid_format_df['data_ent'], format='%d-%m-%Y')
+        valid_format_df['discharge_date'] = pd.to_datetime(valid_format_df['data_alta'], format='%d-%m-%Y')
+        
+        # Find records where discharge date is before admission date
+        chronology_errors = valid_format_df['discharge_date'] < valid_format_df['admission_date']
+        error_count = chronology_errors.sum()
+        
+        if error_count == 0:
+            print("   ✅ All discharge dates are on or after their corresponding admission dates")
+        else:
+            print(f"   ⚠️ Found {error_count} records where discharge date is before admission date")
+            print("\n   Chronology errors:")
+            
+            error_rows = valid_format_df[chronology_errors]
+            for i, (idx, row) in enumerate(error_rows.iterrows(), 1):
+                if i <= 15:
+                    print(f"   {i}. ID '{row['ID']}': admission date '{row['data_ent']}' occurs AFTER discharge date '{row['data_alta']}' (row {idx + 2})")
+                else:
+                    print(f"      ... and {len(error_rows) - 15} more")
+                    break
+                    
+        # Calculate hospitalization duration statistics
+        valid_format_df['days_hospitalized'] = (valid_format_df['discharge_date'] - valid_format_df['admission_date']).dt.days
+        
+        print("\n📊 Hospitalization Duration Statistics:")
+        print(f"   Average stay: {valid_format_df['days_hospitalized'].mean():.1f} days")
+        print(f"   Median stay: {valid_format_df['days_hospitalized'].median():.1f} days")
+        print(f"   Shortest stay: {valid_format_df['days_hospitalized'].min()} days")
+        print(f"   Longest stay: {valid_format_df['days_hospitalized'].max()} days")
+        
+        # Show extremely long stays (potential errors)
+        long_stays = valid_format_df[valid_format_df['days_hospitalized'] > 60].sort_values('days_hospitalized', ascending=False)
+        if not long_stays.empty:
+            print("\n⚠️ Potentially unusual long stays (> 60 days):")
+            for i, (idx, row) in enumerate(long_stays.iterrows(), 1):
+                if i <= 5:
+                    print(f"   {i}. ID '{row['ID']}': {row['days_hospitalized']} days (admitted: {row['data_ent']}, discharged: {row['data_alta']}) - row {idx + 2}")
+                else:
+                    print(f"      ... and {len(long_stays) - 5} more")
+                    break
+            
+    except Exception as e:
+        print(f"   ⚠️ Error analyzing date chronology: {str(e)}")
+    
+    print("\n" + "="*80)
+
+
 def main():
     """
     Main quality control workflow.
@@ -425,7 +547,9 @@ def main():
         
         # Analyze admission dates
         analyze_admission_dates(df)
-
+        
+        # Analyze discharge dates
+        analyze_discharge_dates(df)
         
     except Exception as e:
         logger.error(f"Quality control failed: {str(e)}")
@@ -433,6 +557,8 @@ def main():
         return 1
         
     return 0
-        
+
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    sys.exit(exit_code)
+# End of script
