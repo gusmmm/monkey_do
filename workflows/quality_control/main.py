@@ -1,0 +1,87 @@
+# workflows/quality_control/main.py
+import pandas as pd
+from pathlib import Path
+import logging
+import sys
+
+# Import analyzers
+from .analyzers.file_analyzer import FileAnalyzer
+from .analyzers.id_analyzer import IDAnalyzer
+from .analyzers.admission_analyzer import AdmissionDateAnalyzer
+from .analyzers.discharge_analyzer import DischargeDateAnalyzer
+
+# Import reporters
+from .reporters.console_reporter import ConsoleReporter
+
+# Configure logging
+logger = logging.getLogger("QualityControl")
+
+# Helper functions
+def find_doentes_csv() -> Path:
+    """
+    Locate the Doentes.csv file in the spreadsheets directory.
+    
+    Returns:
+        Path: The path to the Doentes.csv file
+    """
+    # Import paths from project core
+    from core.paths import paths
+    
+    # Default location based on project structure
+    csv_path = paths.SPREADSHEET_SOURCE / "Doentes.csv"
+    
+    if not csv_path.exists():
+        logger.error(f"Doentes.csv not found at {csv_path}")
+        raise FileNotFoundError(f"Could not find Doentes.csv at {csv_path}")
+        
+    return csv_path
+
+def run_quality_control(csv_path: Path = None) -> int:
+    """
+    Run the quality control workflow on the specified CSV file.
+    
+    Args:
+        csv_path: Path to CSV file (if None, will look for default location)
+        
+    Returns:
+        int: Exit code (0 for success, 1 for error)
+    """
+    try:
+        # Find CSV file if not provided
+        if csv_path is None:
+            csv_path = find_doentes_csv()
+            
+        print(f"\n🔍 Starting quality control analysis on: {csv_path}")
+        
+        # Load the dataframe
+        df = pd.read_csv(csv_path, dtype={'ID': str})  # Force ID column as string
+        
+        # Initialize reporter
+        reporter = ConsoleReporter()
+        
+        # Run file analysis
+        file_analyzer = FileAnalyzer(df, csv_path)
+        reporter.report_file_analysis(file_analyzer.analyze())
+        
+        # Run ID analysis
+        id_analyzer = IDAnalyzer(df)
+        if id_analyzer.is_applicable():
+            reporter.report_id_analysis(id_analyzer.analyze())
+        
+        # Run admission date analysis
+        admission_analyzer = AdmissionDateAnalyzer(df)
+        if admission_analyzer.is_applicable():
+            reporter.report_admission_analysis(admission_analyzer.analyze())
+        
+        # Run discharge date analysis
+        discharge_analyzer = DischargeDateAnalyzer(df)
+        if discharge_analyzer.is_applicable():
+            reporter.report_discharge_analysis(discharge_analyzer.analyze())
+        
+        print("\n✅ Quality control analysis completed successfully")
+        return 0
+        
+    except Exception as e:
+        logger.error(f"Quality control failed: {str(e)}")
+        print(f"❌ Quality control failed: {str(e)}")
+        return 1
