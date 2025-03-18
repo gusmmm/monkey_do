@@ -6,10 +6,11 @@ from typing import Dict, Any, List, Optional
 class MarkdownReportGenerator:
     """Generates a Markdown report of the quality control analysis."""
     
-    def __init__(self, results: Dict[str, Dict[str, Any]], file_path: Path):
-        """Initialize with analysis results and file path."""
+    def __init__(self, results: Dict[str, Dict[str, Any]], file_path: Path, filter_info: Dict[str, Any] = None):
+        """Initialize with analysis results, file path, and optional filter info."""
         self.results = results
         self.file_path = file_path
+        self.filter_info = filter_info or {"is_filtered": False}
         self.report_sections = []
     
     def add_section(self, title: str, content: str) -> None:
@@ -253,7 +254,27 @@ class MarkdownReportGenerator:
     def generate_report(self) -> str:
         """Generate the full Markdown report."""
         report = f"# Quality Control Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        
+        # Add file information
         report += f"**File:** {self.file_path}\n\n"
+        
+        # Add filter information if applicable
+        if self.filter_info.get("is_filtered", False):
+            filter_type = self.filter_info.get("filter_type")
+            filter_value = self.filter_info.get("filter_value")
+            total_records = self.filter_info.get("total_records", 0)
+            filtered_records = self.filter_info.get("filtered_records", 0)
+            
+            if filter_type == "single":
+                report += f"**Filter:** Showing records from year {filter_value} only\n"
+            elif filter_type == "range":
+                report += f"**Filter:** Showing records from years {filter_value}\n"
+            
+            percentage = (filtered_records / total_records) * 100 if total_records > 0 else 0
+            report += f"**Records:** {filtered_records:,} of {total_records:,} total ({percentage:.1f}%)\n\n"
+        else:
+            report += "**Scope:** Full database (no filters applied)\n\n"
+        
         report += "\n\n".join(self.report_sections)
         return report
     

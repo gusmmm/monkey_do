@@ -102,12 +102,13 @@ def collect_analysis_results(df: pd.DataFrame, csv_path: Path) -> dict:
     
     return results
 
-def run_quality_control(csv_path: Path = None) -> int:
+def run_quality_control(csv_path: Path = None, year_filter: str = None) -> int:
     """
     Run the quality control workflow on the specified CSV file.
     
     Args:
         csv_path: Path to CSV file (if None, will look for default location)
+        year_filter: String specifying year filter (e.g., "25" for 2025 or "25-20" for range)
         
     Returns:
         int: Exit code (0 for success, 1 for error)
@@ -121,6 +122,58 @@ def run_quality_control(csv_path: Path = None) -> int:
         
         # Load the dataframe
         df = pd.read_csv(csv_path, dtype={'ID': str})  # Force ID column as string
+        
+        # Track filter info for reporting
+        filter_info = {
+            "is_filtered": False,
+            "filter_type": None,
+            "filter_value": None,
+            "total_records": len(df),
+            "filtered_records": len(df)
+        }
+        
+        # Apply year filter if specified
+        if year_filter:
+            filter_info["is_filtered"] = True
+            
+            # Determine filter type (single year or range)
+            if '-' in year_filter:
+                start_year, end_year = year_filter.split('-')
+                if start_year.isdigit() and end_year.isdigit():
+                    # Ensure start year is greater than or equal to end year for consistent display
+                    if int(start_year) < int(end_year):
+                        start_year, end_year = end_year, start_year
+                    filter_info["filter_type"] = "range"
+                    filter_info["filter_value"] = f"20{start_year} to 20{end_year}"
+            else:
+                if year_filter.isdigit():
+                    filter_info["filter_type"] = "single"
+                    filter_info["filter_value"] = f"20{year_filter}"
+            
+            # Apply the filter
+            original_count = len(df)
+            from .utils.helpers import filter_dataframe_by_year
+            df = filter_dataframe_by_year(df, year_filter)
+            filtered_count = len(df)
+            
+            filter_info["filtered_records"] = filtered_count
+            
+            if filtered_count == 0:
+                print(f"❌ No records found matching year filter '{year_filter}'")
+                return 1
+                
+            # Show clear filtering information
+            if filter_info["filter_type"] == "single":
+                print(f"📊 FILTERED VIEW: Analyzing records from year {filter_info['filter_value']} only")
+            elif filter_info["filter_type"] == "range":
+                print(f"📊 FILTERED VIEW: Analyzing records from years {filter_info['filter_value']}")
+            
+            print(f"📄 Records: {filtered_count:,} of {original_count:,} total ({filtered_count/original_count:.1%})")
+        else:
+            print(f"📊 FULL DATABASE: Analyzing all {len(df):,} records")
+        
+        # Add a separator line for better readability
+        print("\n" + "="*80)
         
         # Initialize reporter for console output
         reporter = ConsoleReporter()
@@ -183,9 +236,9 @@ def run_quality_control(csv_path: Path = None) -> int:
             from core.paths import ProjectPaths
             paths = ProjectPaths()
             
-            # Create report generator
+            # Create report generator with filter info
             logger.info("Creating markdown report...")
-            report_generator = MarkdownReportGenerator(results, csv_path)
+            report_generator = MarkdownReportGenerator(results, csv_path, filter_info)
             report_generator.generate_file_analysis_section()
             report_generator.generate_id_analysis_section()
             report_generator.generate_date_analysis_section("data_ent", "Admission Date Analysis")
