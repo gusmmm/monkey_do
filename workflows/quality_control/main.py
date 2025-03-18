@@ -9,6 +9,7 @@ from .analyzers.file_analyzer import FileAnalyzer
 from .analyzers.id_analyzer import IDAnalyzer
 from .analyzers.admission_analyzer import AdmissionDateAnalyzer
 from .analyzers.discharge_analyzer import DischargeDateAnalyzer
+from .analyzers.birth_analyzer import BirthDateAnalyzer
 
 # Import reporters
 from .reporters.console_reporter import ConsoleReporter
@@ -77,6 +78,11 @@ def run_quality_control(csv_path: Path = None) -> int:
         discharge_analyzer = DischargeDateAnalyzer(df)
         if discharge_analyzer.is_applicable():
             reporter.report_discharge_analysis(discharge_analyzer.analyze())
+        
+        # Run birth date analysis
+        birth_analyzer = BirthDateAnalyzer(df)
+        if birth_analyzer.is_applicable():
+            reporter.report_birth_analysis(birth_analyzer.analyze())
         
         print("\n✅ Quality control analysis completed successfully")
         return 0

@@ -266,6 +266,117 @@ class ConsoleReporter:
         
         print("\n" + "="*80)
     
+    def report_birth_analysis(self, results: Dict[str, Any]) -> None:
+        """Format birth date analysis results for console."""
+        print("\n" + "="*80)
+        print("👶 BIRTH DATE ANALYSIS")
+        print("="*80)
+        
+        # Report missing dates
+        missing = results.get('missing', {})
+        print("\n🔍 Missing Birth Date Analysis:")
+        if missing.get('count', 0) == 0:
+            print("   ✅ No missing birth dates found")
+        else:
+            print(f"   ⚠️ Found {missing['count']} missing birth dates ({missing['percentage']:.2%} of total records)")
+            self._print_row_list(missing.get('rows', []))
+        
+        # Report date format
+        format_results = results.get('format', {})
+        print("\n📋 Date Format Analysis:")
+        if format_results.get('invalid_count', 0) == 0:
+            print("   ✅ All birth dates follow the expected format (dd-mm-yyyy)")
+        else:
+            print(f"   ⚠️ Found {format_results['invalid_count']} birth dates with unexpected format")
+            print("\n   Records with invalid date formats:")
+            
+            for i, example in enumerate(format_results.get('invalid_examples', []), 1):
+                print(f"   {i}. ID '{example['id']}' has birth date '{example['date']}' at row {example['row'] + 2}")
+        
+        # Report date validity
+        validity = results.get('validity', {})
+        print("\n🔎 Birth Date Validity Check:")
+        
+        if 'error' in validity:
+            print(f"   ⚠️ Error analyzing date validity: {validity['error']}")
+        else:
+            too_old_count = validity.get('too_old_count', 0)
+            future_count = validity.get('future_count', 0)
+            
+            if too_old_count == 0 and future_count == 0:
+                print("   ✅ All birth dates are within reasonable ranges (1900 to present)")
+            else:
+                if too_old_count > 0:
+                    print(f"   ⚠️ Found {too_old_count} birth dates before 1900")
+                    print("\n   Examples of unusually old birth dates:")
+                    for i, example in enumerate(validity.get('too_old_examples', []), 1):
+                        print(f"   {i}. ID '{example['id']}' has birth date '{example['date']}' (year {example['year']}) at row {example['row'] + 2}")
+                
+                if future_count > 0:
+                    print(f"   ⚠️ Found {future_count} birth dates in the future")
+                    print("\n   Examples of future birth dates:")
+                    for i, example in enumerate(validity.get('future_examples', []), 1):
+                        print(f"   {i}. ID '{example['id']}' has birth date '{example['date']}' (year {example['year']}) at row {example['row'] + 2}")
+        
+        # Report age statistics
+        age_stats = results.get('age', {})
+        print("\n📊 Patient Age Statistics:")
+        
+        if 'error' in age_stats:
+            if age_stats['error'] == 'Admission date column not found':
+                print("   ⚠️ Cannot calculate patient age: admission date column not found")
+            elif age_stats['error'] == 'No records with both admission and birth dates':
+                print("   ℹ️ No records with both admission and birth dates found")
+            elif age_stats['error'] == 'No records with valid date formats':
+                print("   ⚠️ No records with valid date formats found")
+            else:
+                print(f"   ⚠️ Error calculating age statistics: {age_stats['error']}")
+        elif age_stats.get('count', 0) == 0:
+            print("   ℹ️ No data available for age statistics")
+        else:
+            print(f"   Records analyzed: {age_stats['count']}")
+            print(f"   Average age: {age_stats['mean_age']:.1f} years")
+            print(f"   Median age: {age_stats['median_age']:.1f} years")
+            print(f"   Youngest patient: {age_stats['min_age']:.1f} years")
+            print(f"   Oldest patient: {age_stats['max_age']:.1f} years")
+            
+            # Display age distribution
+            distribution = age_stats.get('age_distribution', {})
+            if distribution:
+                print("\n   Age Distribution:")
+                for age_range, count in sorted(distribution.items()):
+                    percentage = count / age_stats['count'] * 100
+                    bar_length = int(percentage / 2)  # Scale to reasonable bar length
+                    bar = "█" * bar_length
+                    print(f"   {age_range} years: {count:3d} patients ({percentage:5.1f}%) {bar}")
+            
+            # Report unusual ages
+            unusual = age_stats.get('unusual_ages', {})
+            
+            if unusual:
+                # Very young patients
+                very_young_count = unusual.get('very_young_count', 0)
+                if very_young_count > 0:
+                    print(f"\n   ⚠️ Found {very_young_count} very young patients (under 5 years old)")
+                    for i, example in enumerate(unusual.get('very_young', []), 1):
+                        print(f"   {i}. ID '{example['id']}' age: {example['age']:.1f} years (birth: {example['birth_date']}, admission: {example['admission_date']}) - row {example['row'] + 2}")
+                
+                # Very old patients
+                very_old_count = unusual.get('very_old_count', 0)
+                if very_old_count > 0:
+                    print(f"\n   ⚠️ Found {very_old_count} very old patients (over 100 years old)")
+                    for i, example in enumerate(unusual.get('very_old', []), 1):
+                        print(f"   {i}. ID '{example['id']}' age: {example['age']:.1f} years (birth: {example['birth_date']}, admission: {example['admission_date']}) - row {example['row'] + 2}")
+                
+                # Negative ages
+                negative_count = unusual.get('negative_count', 0)
+                if negative_count > 0:
+                    print(f"\n   ⚠️ Found {negative_count} patients with negative ages (admission before birth!)")
+                    for i, example in enumerate(unusual.get('negative', []), 1):
+                        print(f"   {i}. ID '{example['id']}' age: {example['age']:.1f} years (birth: {example['birth_date']}, admission: {example['admission_date']}) - row {example['row'] + 2}")
+        
+        print("\n" + "="*80)
+    
     def _print_row_list(self, rows: List[int], limit: int = 10) -> None:
         """Helper to print a list of row numbers with limit."""
         # Add 2 to row index (1 for 0-indexing, 1 for header row in CSV)
