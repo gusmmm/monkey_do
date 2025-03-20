@@ -19,6 +19,7 @@ sys.path.insert(0, str(project_root))
 # Import project modules
 from core.paths import paths
 from utils.data_tools.gsheet import GoogleSheetsClient
+from utils.data_tools.patient_data import process_patients_to_json
 from workflows.quality_control import run_quality_control
 
 
@@ -106,6 +107,33 @@ def worksheet_download_menu() -> None:
         time.sleep(1)
 
 
+def patient_data_menu() -> None:
+    """Handle the patient data processing functionality."""
+    clear_screen()
+    print_header("🏥 Patient Data Processing")
+    
+    print("This option converts patient data from CSV to JSON files for MongoDB import.\n")
+    print("You'll be able to:")
+    print("  • Process the entire dataset or filter by year")
+    print("  • Preview data before processing")
+    print("  • Generate individual JSON files for each patient")
+    print("  • Prepare data for MongoDB import")
+    
+    proceed = input("\n👉 Ready to proceed? [Y/n]: ").lower()
+    if proceed in ['', 'y', 'yes']:
+        try:
+            # Run the patient data processing
+            process_patients_to_json()
+            
+            input("\n✅ Press Enter to return to the main menu...")
+        except Exception as e:
+            print(f"\n❌ Error: {str(e)}")
+            input("\nPress Enter to return to the main menu...")
+    else:
+        print("\n⏭️ Returning to main menu...")
+        time.sleep(1)
+
+
 def quality_control_menu() -> None:
     """Handle the quality control workflow with options for year filtering."""
     clear_screen()
@@ -179,15 +207,17 @@ def main_menu() -> None:
     """Display main menu and handle user selection."""
     menu_options = {
         "1": "Download Google Sheets Data",
-        "2": "Run Quality Control Analysis",
-        "3": "Exit"
+        "2": "Process Patient Data (CSV to JSON)",
+        "3": "Run Quality Control Analysis",
+        "4": "Exit"
     }
     
     # Define menu to function mapping
     menu_actions = {
         1: worksheet_download_menu,
-        2: quality_control_menu,
-        3: lambda: sys.exit(0)  # Exit action
+        2: patient_data_menu,
+        3: quality_control_menu,
+        4: lambda: sys.exit(0)  # Exit action
     }
     
     while True:
